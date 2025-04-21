@@ -1,3 +1,6 @@
+libname sdtm "C:\Users\gonza\OneDrive - datarichconsulting.com\Desktop\GitHub\Patient-Profiles\SDTM";
+
+
 %let rundate = %sysfunc(date(), date9.);
 %let subj_subset = %str();                 ** specify subset of subjects to include in profiles;
 %let highlight_updates = N;                ** highlight new/changed records since prior run (Y or N);
