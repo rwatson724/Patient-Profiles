@@ -1,16 +1,27 @@
-libname sdtm "C:\Users\gonza\OneDrive - datarichconsulting.com\Desktop\GitHub\Patient-Profiles\SDTM";
 
+%if %upcase(&sysuserid) = JMHOR %then %do;
+	%let rootdir = C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles;
+%end;
+%else %do;
+	%let rootdir = C:\Users\gonza\OneDrive - datarichconsulting.com\Desktop\GitHub\Patient-Profiles;
+%end;
+
+libname sdtm "&rootdir.\SDTM";
+libname pdata "&rootdir.\pdata";
+filename ppmacros "&rootdir.\Program";
+%let outpath = &rootdir.\Output;
+options mautosource sasautos=(sasautos ppmacros);
 
 %let rundate = %sysfunc(date(), date9.);
 %let subj_subset = %str();                 ** specify subset of subjects to include in profiles;
 %let highlight_updates = N;                ** highlight new/changed records since prior run (Y or N);
 
-8/* if highlighting of change is enabled, date of prior run to the use as a basis for comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
+/* if highlighting of change is enabled, date of prior run to the use as a basis for comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
 options nomlogic nomprint nosymbolgen;
-ods graphics / reset = all noborder attrpriority = none width = 6in heigh = 6in;
+ods graphics / reset = all noborder attrpriority = none width = 6in height = 6in;
 
-%let sectionlist = DM RP DC SV DS AE MH CM PR MRI ULT QS LB EG VS;
-%let pageafter = SV AE MH NP QS LB EG;
+%let sectionlist = DM AE VS; *DM RP DC SV DS AE MH CM PR MRI ULT QS LB EG VS;
+%let pageafter = AE; *SV AE MH NP QS LB EG;
 
 
 /* set up format to label visits for tables and figures */
@@ -32,7 +43,7 @@ proc sql;
    order by SV.VISITNUM;
 quit;
 
-proc fomrat cntlin = vislblfmt;
+proc format cntlin = vislblfmt;
 run;
 
 /* retrieve the data for each section */
@@ -63,10 +74,11 @@ run;
 %get_profile_data
 
 /* define custom template to use for patient profiles */
+
 proc template;
    define style STYLES.SMALLER;
       parent = STYLES.PRINTER;
-      /* reduce all sizes by 2pt */
+      * reduce all sizes by 2pt;
       class fonts from fonts / 'TitleFont2'          = ("Times", 10pt, Bold Italic)
                                'TitleFont'           = ("Times", 11pt, Bold Italic)
                                'StrongFont'          = ("Times", 8pt, Bold)
@@ -87,64 +99,41 @@ run;
 
 /* create patient profile master list in Excel */
 /* Algorithm to derive subject status          */
-/* ADD LATER */
+
+proc sort data=sdtm.sv out=sv; by usubjid visitnum; run;
+data lastvis; set sv; by usubjid; if last.usubjid; run;
+
 proc sql;
    create table profilelist as
    select a.USUBJID label = 'Unique Subject ID',
           a.SUBJID label = 'Subject ID',
           scan(a.RFICDTC, 1, 'T') as icfdate,
           scan(a.RFXSTDTC, 1, 'T') as firstdose,
-          case
-             when not missing(b.etdate)   then cats('Early Termination (', b.ETDATE, ')')
-             when not missing(c.oledate)  then 'On Treatment - OLE'
-             when not missing(d.rescdate) then 'On Treatment - Rescue'
-             when not missing(a.RFXSTDTC) then 'On Treatment - RC'
-             else 'In Screening'
-          end as subjstatus label = 'Subject Status' length = 50,
-          coalescec(e.VISIT, 'No visit records') as lastvis label = 'Last Visit' length = 50,
-          e.VISABBR,
-          f.ASDCOMP
-   from (select * from dmfinal where ACTARMCD ne '') a
+		  b.DSDECOD as subjstatus label = 'Subject Status' length = 50,
+          coalescec(e.VISIT, 'No visit records') as lastvis label = 'Last Visit' length = 50
+   from (select * from dmfinal where ACTARMCD not in ('Scrnfail','')) a
         left join
-        (select USUBJID, DSSTDTC as etdate 
-         from SDTM.DS
-         where DSSCAT = 'EARLY TERMINATION') b
-        on a.USUBJID = b.USUBJID
-
+	        (select USUBJID, DSDECOD
+	         from SDTM.DS
+	         where DSCAT = 'DISPOSITION EVENT') b
+	        on a.USUBJID = b.USUBJID     
         left join
-        (select USUBJID, DSSTDTC as oledate
-         from SDTM.DS
-         where DSSCAT = 'ENTERED OPEN-LABEL EXTENSION PHASE') c
-        on a.USUBJID = c.USUBJID
-
-        left join
-        (select USUBJID, min(CMSTDTC) as rescdate
-         from cmfinal
-         where upcase(CMTYPE) = 'RESCUE'
-         group by USUBJID) d
-        on a.USUBJID = d.USUBJID
-        
-        left join
-        lastvis e
-        on a.USUBJD = e.USUBJID
-
-        left join
-        asdcomp f
-        on a.USUBJID = f.USUBJID
-        order by a.USUBJIJD, a.SUBJID;
+		    lastvis e
+		    on a.USUBJID = e.USUBJID;
 quit;
 
 ods listing close;
-ods excel file "&path\patient_profile_master_list_&rundate..xlsx"
+ods excel file="&outpath.\patient_profile_master_list_&rundate..xlsx"
           options (sheet_name = "Patient Profile List");
 
 proc report data = profilelist;
- /*** missing rest of code ***/
+	columns usubjid subjid icfdate firstdose subjstatus lastvis;
 run;
 
 ods excel close;
 
 /* create patient profile output */
+/*
 ods _all_ close;
 options nodate nonumber orientation = portrait;
 ods escapechar = '^';
@@ -161,7 +150,7 @@ ods escapechar = '^';
 
    %do i = 1 %to &subjcount;
       proc sql noprint;
-         select coalescec(icfcate, 'No Data'), 
+         select coalescec(icfdate, 'No Data'), 
                 coalescec(firstdose, 'No Data'),
                 subjstatus, lastvis, visabbr
                 into
@@ -212,7 +201,7 @@ ods escapechar = '^';
             %&macro_to_call;
          %end;
 
-         /* insert a page break between sections only when specified */
+         *insert a page break between sections only when specified;
          %if %index(&pageafter, &sec) %then ods startpage = yes;
          else ods startpage = no;
          ;
@@ -222,6 +211,7 @@ ods escapechar = '^';
    %end;
 
    /* set length of all character variables in all QC data sets to the length of the longest value to faciliate QC */
+/*
    proc sql noprint;
       select distinct MEMNAME into :ds1 - 
       from DICTIONARY.TABLES
@@ -232,4 +222,4 @@ ods escapechar = '^';
    %do &dsnum = 1 %to &dscount;
       %m_minvarlen(indsn = PDATA.&&ds&dsnum)
    %end;
-%mend create_profile_outputs;
+%mend create_profile_outputs;*/

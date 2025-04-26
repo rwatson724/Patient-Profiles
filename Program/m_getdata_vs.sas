@@ -17,4 +17,4 @@
       length vislbl $6;
       vislbl = put(VISITNUM, vislbl.);
    run;
-%mend m_getdta_vs;
+%mend m_getdata_vs;
