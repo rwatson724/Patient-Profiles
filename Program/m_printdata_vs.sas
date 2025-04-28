@@ -1,21 +1,19 @@
-/* utility to print the AE section of the patient profile */
+/* utility to print the VS section of the patient profile */
 %macro m_printdata_vs;
-   %local vitalvislist numvitalsvisits vitalsvisnum xmin xmax blk3lbl;
-
-   %let blk3lbl = %sysfunc(ifc(&oleflag, OLE, Follow-Up));
+   %local vitalsvislist numvitalsvisits vitalsvisnum xmin xmax;
 
    /* create a subject-specific visit format for figure x-axis labels */
    proc sql;
       create table vsfigfmt as
       select distinct xvar as start,
                       put(VISITNUM, vislbl.) as label,
-                      case when VISITNUM < 9 then 'Screening'
-                           when VISITNUM >= 20 then "&blk3lbl"
+                      case when VISITNUM < 3 then 'Screening'
+                           when VISITNUM > 100 then "Follow-up"
                            else 'Treatment'
                       end as blocklbl,
                       'XVARFMT' as fmtname
       from svfinal
-      where VISITNUM = int(VISITNUM) and USUBJID = "&&usubj&i";
+      where not visit like 'UNSCHEDULED%' and USUBJID = "&&usubj&i";
    quit;
 
    proc format cntlin = vsfigfmt; run;
@@ -31,15 +29,15 @@
       where not missing(VSSTRESU);
    quit;
 
-   proc formt cntlin = vsfmtin; run;
+   proc format cntlin = vsfmtin; run;
 
    /* create a distinct attribute map data set for block coloring */
    data vsattrmap;
       length id $11 value $9;
       id = 'blockcolors';
       do i = 1 to 3;
-         value = choosec(i, 'Screening', 'Treatment', "&blk3lbl");
-         fillcolor = choosec(i, 'CXe7E8C6', 'CXEBEFF7', 'CXF7DFDB');
+         value = choosec(i, 'Screening', 'Treatment', "Follow-up");
+         fillcolor = choosec(i, 'CXE7E8C6', 'CXEBEFF7', 'CXF7DFDB');
          output;
       end;
    run;
@@ -48,7 +46,7 @@
    data vssubset;
       set vsfinal end = eof;
       where USUBJID = "&&usubj&i" and 
-            VSTESTCD in ('DIABP' 'SYSBP' 'HR' 'RESP' 'TEMP' 'WEIGHT') and
+            VSTESTCD in ('DIABP' 'SYSBP' 'PULSE' 'TEMP' 'WEIGHT') and
             not nmiss(VSSTRESN, VISITNUM);
 
       /* round all vital results for display */
@@ -56,8 +54,8 @@
 
       /* derive block labels */
       length blocklbl $9;
-      if VISITNUM < 9 then blocklbl = 'Screening';
-      else if VISITNUM >= 20 then blocklbl = "&blk3lbl";
+      if VISITNUM < 3 then blocklbl = 'Screening';
+      else if VISITNUM > 100 then blocklbl = "Follow-up";
       else blocklbl = 'Treatment';
    run;
 
@@ -69,7 +67,7 @@
 
    %if &numvsrecs > 0 %then %do;
       proc sort data = vssubset;
-          by dummy VSTESTCD VSSTEST;
+          by dummy VSTESTCD VSTEST;
       run;
 
       proc transpose data = vssubset
@@ -80,22 +78,18 @@
       run;
 
       /* get list of all visits for the current subject */
-      proc sql noprint;
-         select distinct NAME,
-                         whichc(first(NAME), 'S', 'D', 'W', 'E') as sort1,
-                         ifn(index(NAME, '_'), 1, 0) as sort2,
-                         input(substr(NAME, anydigit(NAME)), best.) as sort3
-                         into
-                         :vitalsvislist separated by ' ',
-                         :dumm1, :dummy2, :dummy3
+      proc sql noprint; 
+         select distinct NAME, ifn(name like 'UN%',2,1) as sort1, input(NAME,visord.) as sort2
+                         into :vitalsvislist separated by ' ', :dummy1, :dummy2
          from DICTIONARY.COLUMNS
          where LIBNAME = 'WORK' and MEMNAME = 'VSTRANS' and 
-               (NAME like 'S%' or NAME like 'W%' or NAME like '01%' or NAME = 'ET')
-         order by sort1, sort2, sort3;
+               (NAME like 'SCR%' or NAME like 'WK%' or NAME like 'EC%' or NAME like 'UN%'
+			    or NAME in ('BSLN','AEFU','RETR','RAFU'))
+         order by sort1, sort2;
          %let numvitalsvisits = &sqlobs;
       quit;
 
-      %if nrbquote(&highlight_upates) = Y %then %do;
+      %if %nrbquote(&highlight_updates) = Y %then %do;
          data vsprev;
             set PREVDAT.PP_VS;
             where USUBJID = "&&usubj&i";
@@ -115,16 +109,16 @@
                   style(report) = [just = left] 
                   out = work.qc_vs_&i;
          columns dummy ('Vital Signs' VSTESTCD
-                        %if nrbquote(&highlight_upates) = Y %then newflag modcols;
-                        &vitalvislist);
+                        %if %nrbquote(&highlight_updates) = Y %then newflag modcols;
+                        &vitalsvislist);
          define dummy    / order noprint;
          define VSTESTCD / display 'Vital Sign Parameter' format = $vsfmt. style = [cellwidth = 1.5in just = c];
-         %if nrbquote(&highlight_upates) = Y %then %do;
+         %if %nrbquote(&highlight_updates) = Y %then %do;
             define newflag   / display noprint;
             define modcols   / display noprint;
          %end;
          %do vitalsvisnum = 1 %to &numvitalsvisits;
-            define %scan(&vitalsvislist, &vitalsvisnum) / display "%sysfunc(translate(%scan(&vitalsvislist, &vitalsvisnum), ., _))"
+            define %scan(&vitalsvislist, &vitalsvisnum) / display 
                    %if &numvitalsvisits < 5 %then style = [cellwidth = 1.0in just = c];
                    %else %if &numvitalsvisits < 10 %then style = [cellwidth = 0.7in just = c];
                    %else style = [cellwidth = 0.5in just = c];
@@ -154,12 +148,12 @@
          where VISITNUM = int(VISITNUM) and USUBJID = "&&usubj&i";
       quit;
 
-      /* reduce subjest to only scheduled visits for figures and merge in derived x variable */
+      /* reduce subject to only scheduled visits for figures and merge in derived x variable */
       proc sql;
          create table vssubset2 as
-         select a.*, b.*xvar
+         select a.*, b.xvar
          from (select * from vssubset 
-               where VISITNUM = int(VISITNUM)) a
+               where not visit like 'UNSCHEDULED%') a
               left join
               svfinal b
               on a.USUBJID = b.USUBJID and a.VISITNUM = b.VISITNUM
@@ -172,34 +166,36 @@
          select * 
          from (select distinct VSTESTCD, VSTEST
                from vssubset2) a,
-              (select start as xvar, blocklbl from vsfigfmt) b
+              (select start as xvar, blocklbl from vsfigfmt) b;
       quit;
 
       data vsfigure;
          set vssubset2 blockrecs;
       run;
 
-      proc sort dta = vsfigure;
+      proc sort data = vsfigure;
          by VSTESTCD xvar;
       run;
 
       ods proclabel = 'Vital Signs Figure';
       proc sgpanel noautolegend data = vsfigure dattrmap = vsattrmap;
-         format xvar xvarfmt. VSTESTCD vsfmt.;
-         panelby VSTESTCD / onepanel uniscale = column novarname layout = rowlattice headattrs = (size = 8pt);
+         format xvar xvarfmt. VSTESTCD $vsfmt.;
+         panelby VSTESTCD / onepanel uniscale = column novarname layout = rowlattice headerattrs = (size = 8pt);
          block x = xvar block = blocklbl / extendmissing attrid = blockcolors valueattrs = (size = 7pt);
          series x = xvar y = VSSTRESN / markers
                                         markerattrs = (symbol = circlefilled color = black size = 8px)
                                         lineattrs = (pattern = solid color = black thickness = 1px);
          rowaxis display = (nolabel) thresholdmax = 1 thresholdmin = 1 offsetmax = 0.1;
-         colaxi label = 'Visit' values = (&xmin to &xmax by 1) fitpolicy = staggerthin;
+         colaxis label = 'Visit' values = (&xmin to &xmax by 1) fitpolicy = staggerthin;
       run;
 
       /* append PROC REPORT output data set to QC data set */
       data PDATA.PP_VS;
          set PDATA.PP_VS
-             work.qc_ae_&i (in = currsubj
-                            where = (_break_ = ''));
+             work.qc_vs_&i(
+				in = currsubj
+                where = (_break_ = '')
+				);
          length REPORTCOLS $200;
          if currsubj then do;
             USUBJID = "&&usubj&i";
@@ -208,4 +204,5 @@
          drop dummy _break_;
       run;
    %end;
+
 %mend m_printdata_vs;

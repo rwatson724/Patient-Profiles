@@ -15,6 +15,7 @@
       by USUBJID VSTESTCD VSTEST VISITNUM;
       if last.VISITNUM;
       length vislbl $6;
-      vislbl = put(VISITNUM, vislbl.);
+	  if visit =: 'UNSCHEDULED' then vislbl = cats('UN',translate(scan(visit,2,' '),'_','.'));
+      else vislbl = put(VISITNUM, vislbl.);
    run;
 %mend m_getdata_vs;

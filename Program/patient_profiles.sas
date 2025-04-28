@@ -20,30 +20,59 @@ options mautosource sasautos=(sasautos ppmacros);
 options nomlogic nomprint nosymbolgen;
 ods graphics / reset = all noborder attrpriority = none width = 6in height = 6in;
 
-%let sectionlist = DM AE VS; *DM RP DC SV DS AE MH CM PR MRI ULT QS LB EG VS;
+%let sectionlist = DM SV AE VS; *DM RP DC SV DS AE MH CM PR MRI ULT QS LB EG VS;
 %let pageafter = AE; *SV AE MH NP QS LB EG;
 
 
 /* set up format to label visits for tables and figures */
-proc sql;
-   create table vislblfmt as
-   select distinct 'VISLBL' as fmtname,
-                   'N' as type,
-                   SV.VISITNUM as start,
-                   case 
-                      when SV.VISITNUM < 9 then cats('S', SV.VISITNUM)
-                      when SV.VISITNUM = 109 then 'ET'
-                      when int(SV.VISITNUM) = SV.VISITNUM then cats(first(scan(TV.VISIT, 1)), scan(TV.VISIT, 2))
-                      else cats(first(scan(TV.VISIT, 1)), scan(TV.VISIT, 2), substr(put(SV.VISITNUM, best.), index(put(SV.VISITNUM, best.), '.')))
-                   end as label
-   from SDTM.SV
-        left join
-        SDTM.TV
-   on int(SV.VISITNUM) = TV.VISITNUM
-   order by SV.VISITNUM;
-quit;
 
-proc format cntlin = vislblfmt;
+proc format;
+	value vislbl
+		1.0   = 'SCR1'
+		2.0   = 'SCR2'
+		3.0   = 'BSLN'
+		3.5   = 'ECPL'
+		4.0   = 'WK02'
+		5.0   = 'WK04'
+		6.0   = 'ECRM'
+		7.0   = 'WK06'
+		8.0   = 'WK08'
+		8.1   = 'WK10'
+		9.0   = 'WK12'
+		9.1   = 'WK14'
+		10.0  = 'WK16'
+		10.1  = 'WK18'
+		11.0  = 'WK20'
+		11.1  = 'WK22'
+		12.0  = 'WK24'
+		13.0  = 'WK26'
+		101.0 = 'AEFU'
+		201.0 = 'RETR'
+		501.0 = 'RAFU'
+	;
+	invalue visord
+		'SCR1' =  1
+		'SCR2' =  2  
+		'BSLN' =  3 
+		'ECPL' =  4
+		'WK02' =  5
+		'WK04' =  6
+		'ECRM' =  7
+		'WK06' =  8
+		'WK08' =  9
+		'WK10' = 10
+		'WK12' = 11
+		'WK14' = 12
+		'WK16' = 13
+		'WK18' = 14
+		'WK20' = 15
+		'WK22' = 16
+		'WK24' = 17
+		'WK26' = 18
+		'AEFU' = 19
+		'RETR' = 20
+		'RAFU' = 21
+	;
 run;
 
 /* retrieve the data for each section */
@@ -98,19 +127,27 @@ proc template;
 run;
 
 /* create patient profile master list in Excel */
-/* Algorithm to derive subject status          */
 
-proc sort data=sdtm.sv out=sv; by usubjid visitnum; run;
-data lastvis; set sv; by usubjid; if last.usubjid; run;
+/* Get last visit for each patient */
+proc sort data=sdtm.sv out=sv;
+	by usubjid visitnum;
+run;
+data lastvis;
+	set sv;
+	by usubjid;
+	if last.usubjid;
+	length visabbr $4;
+	visabbr = put(visitnum,vislbl.);
+run;
 
 proc sql;
    create table profilelist as
    select a.USUBJID label = 'Unique Subject ID',
           a.SUBJID label = 'Subject ID',
-          scan(a.RFICDTC, 1, 'T') as icfdate,
-          scan(a.RFXSTDTC, 1, 'T') as firstdose,
+          scan(a.RFXSTDTC, 1, 'T') as firstdose label='First Dose Date',
 		  b.DSDECOD as subjstatus label = 'Subject Status' length = 50,
-          coalescec(e.VISIT, 'No visit records') as lastvis label = 'Last Visit' length = 50
+          coalescec(c.VISIT, 'No visit records') as lastvis label = 'Last Visit' length = 50,
+	      c.visabbr
    from (select * from dmfinal where ACTARMCD not in ('Scrnfail','')) a
         left join
 	        (select USUBJID, DSDECOD
@@ -118,8 +155,8 @@ proc sql;
 	         where DSCAT = 'DISPOSITION EVENT') b
 	        on a.USUBJID = b.USUBJID     
         left join
-		    lastvis e
-		    on a.USUBJID = e.USUBJID;
+		    lastvis c
+		    on a.USUBJID = c.USUBJID;
 quit;
 
 ods listing close;
@@ -127,13 +164,13 @@ ods excel file="&outpath.\patient_profile_master_list_&rundate..xlsx"
           options (sheet_name = "Patient Profile List");
 
 proc report data = profilelist;
-	columns usubjid subjid icfdate firstdose subjstatus lastvis;
+	columns usubjid subjid firstdose subjstatus lastvis;
 run;
 
 ods excel close;
 
 /* create patient profile output */
-/*
+
 ods _all_ close;
 options nodate nonumber orientation = portrait;
 ods escapechar = '^';
@@ -145,22 +182,17 @@ ods escapechar = '^';
              :usubj1 - , :subj1 -
       from profilelist
       order by USUBJID;
-      %let subjcount = $sqlobs;
+      %let subjcount = &sqlobs;
    quit;
 
-   %do i = 1 %to &subjcount;
+   %do i = 1 %to 10;*&subjcount;
       proc sql noprint;
-         select coalescec(icfdate, 'No Data'), 
-                coalescec(firstdose, 'No Data'),
+         select coalescec(firstdose, 'No Data'),
                 subjstatus, lastvis, visabbr
                 into
-                :icfdate, :firstdose, :subjstatus, :lastvis, :visabbr trimmed
+                :firstdose, :subjstatus, :lastvis, :visabbr trimmed
           from profilelist
           where USUBJID = "&&usubj&i";
-
-          select count(*) into :oleflag
-          from SDTM.DS
-          where DSSCAT = 'OPEN LABEL EXTENSION PHASE' and DSDECOD = 'ENTERED INTO TRIAL' and USUBJID = "&&usubj&i";
       quit;
 
       %put;
@@ -175,13 +207,13 @@ ods escapechar = '^';
       %put ******************************************************;
       %put;
 
-      ods pdf file = "&path\profile_&&subj&i.._&visabbr._&rundate..pdf"
-              startpage = no nogtitle nogfootnote pdftoc = 1 style = STYLES.SMALLEr;
+      ods pdf file = "&outpath\profile_&&subj&i.._&visabbr._&rundate..pdf"
+              startpage=no nogtitle nogfootnote pdftoc=1 style=STYLES.SMALLER;
 
-      title1 j = l "Study: XXXX"                   j = r "Page ^{thispage} of ^{lastpage}";
-      title2 j = l "Subject: &&usubj&i (&&subj&i)" j = r "ASD Compliance: No Data";
-      title3 j = l "ICF DAte: &icfdate"            j = r "First Dose Date: &firstdose";
-      title4 j = l "Current Visit: &lastvis"       j = r "Status: &subjstat";
+      title1 j = l "Study: CDISCPILOT01"           j = r "Page ^{thispage} of ^{lastpage}";
+      title2 j = l "Subject: &&usubj&i (&&subj&i)" j = r "First Dose Date: &firstdose";
+      title3 j = l "Status: &subjstatus"           j = r "Current Visit: &lastvis";
+      
       footnote "FULLY VALIDATED, For Internal Use Only";
 
       %do secnum = 1 %to %sysfunc(countw(&sectionlist));
@@ -203,7 +235,7 @@ ods escapechar = '^';
 
          *insert a page break between sections only when specified;
          %if %index(&pageafter, &sec) %then ods startpage = yes;
-         else ods startpage = no;
+         %else ods startpage = no;
          ;
       %end;
 
@@ -222,4 +254,7 @@ ods escapechar = '^';
    %do &dsnum = 1 %to &dscount;
       %m_minvarlen(indsn = PDATA.&&ds&dsnum)
    %end;
-%mend create_profile_outputs;*/
+*/
+%mend create_profile_outputs;
+
+%create_profile_outputs;
