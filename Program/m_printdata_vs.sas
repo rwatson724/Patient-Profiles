@@ -91,7 +91,7 @@
 
       %if %nrbquote(&highlight_updates) = Y %then %do;
          data vsprev;
-            set PREVDAT.PP_VS;
+            set PREVPDAT.PP_VS;
             where USUBJID = "&&usubj&i";
             drop USUBJID;
          run;

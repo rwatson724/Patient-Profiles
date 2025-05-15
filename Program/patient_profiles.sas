@@ -8,13 +8,15 @@
 
 libname sdtm "&rootdir.\SDTM";
 libname pdata "&rootdir.\pdata";
+libname prevpdat "&rootdir.\pdataold";
+
 filename ppmacros "&rootdir.\Program";
 %let outpath = &rootdir.\Output;
 options mautosource sasautos=(sasautos ppmacros);
 
 %let rundate = %sysfunc(date(), date9.);
 %let subj_subset = %str();                 ** specify subset of subjects to include in profiles;
-%let highlight_updates = N;                ** highlight new/changed records since prior run (Y or N);
+%let highlight_updates = Y;                ** highlight new/changed records since prior run (Y or N);
 
 /* if highlighting of change is enabled, date of prior run to the use as a basis for comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
 options nomlogic nomprint nosymbolgen;
@@ -224,7 +226,7 @@ ods escapechar = '^';
             %m_printdata_lb(labpage = 1,  labtestlist = IGF~ICGF1, grplabel = IGF-1)
             %m_printdata_lb(labpage = 2,  labtestlist = GH~SOMATRO, grplabel = Growth Hormone)
             %m_printdata_lb(labpage = 3,  labtestlist = HORMONES~T3FR HORMONES~T4FR HORMONES~TSH, grplabel = Chemistry Part 1)
-            %m_printdata_lb(labpage = 4,  labtestlist = CHEMISTRY~ALB CHEMISTRY~CL CHEMISTRY~PHOS CHEMISTRY~CA, grplabel = Chemistry Ppart 2)
+            %m_printdata_lb(labpage = 4,  labtestlist = CHEMISTRY~ALB CHEMISTRY~CL CHEMISTRY~PHOS CHEMISTRY~CA, grplabel = Chemistry Part 2)
             ...
             %m_printdata_lb(labpage = 20, labtestlist = PREGNANCYTEST~HCG, grplabel = Pregnancy Test)
          %end;
@@ -243,7 +245,7 @@ ods escapechar = '^';
    %end;
 
    /* set length of all character variables in all QC data sets to the length of the longest value to faciliate QC */
-/*
+
    proc sql noprint;
       select distinct MEMNAME into :ds1 - 
       from DICTIONARY.TABLES
@@ -251,10 +253,10 @@ ods escapechar = '^';
       %let dscount = &sqlobs;
    quit;
 
-   %do &dsnum = 1 %to &dscount;
+   %do dsnum = 1 %to &dscount;
       %m_minvarlen(indsn = PDATA.&&ds&dsnum)
    %end;
-*/
+
 %mend create_profile_outputs;
 
 %create_profile_outputs;

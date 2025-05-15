@@ -5,13 +5,13 @@
       set sdtm.dm;
       %if &subj_subset ne  %then where &subj_subset; ;
    run;
-/*
+
    %if %nrbquote(&highlight_updates) = Y %then %do;
       %m_add_update_vars(dsetin_curr = dmfinal,
-                         dsetin_prev = PREVPAT.PP_DM,
+                         dsetin_prev = PREVPDAT.PP_DM,
                          dsetout     = dmfinal,
                          keyvarlist  = USUBJID,
                          othvarlist  = );
    %end;
-*/
-%mend m_getdata_ae;
+
+%mend m_getdata_dm;

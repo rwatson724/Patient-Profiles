@@ -14,13 +14,13 @@
 		if visit ^=: 'UNSCHEDULED' then xvar = _xvar;
 		drop _xvar;
    run;
-/*
+
    %if %nrbquote(&highlight_updates) = Y %then %do;
-      %m_add_update_vars(dsetin_curr = dmfinal,
-                         dsetin_prev = PREVPAT.PP_DM,
-                         dsetout     = dmfinal,
+      %m_add_update_vars(dsetin_curr = svfinal,
+                         dsetin_prev = PREVPDAT.PP_DM,
+                         dsetout     = svfinal,
                          keyvarlist  = USUBJID,
                          othvarlist  = );
    %end;
-*/
+
 %mend m_getdata_sv;
