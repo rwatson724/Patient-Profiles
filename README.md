@@ -1,1 +1,5 @@
 # Patient-Profiles
+
+Patient profiles are often used to monitor the conduct of a clinical trial, detect safety signals, identify data entry errors, and catch protocol deviations. Each profile combines key data collected regarding a single subject – everything from dosing to adverse events to lab results. This example shows how to leverage the SAS Macro Language, Output Delivery System (ODS), the REPORT procedure, and ODS Statistical Graphics to blend both tabular and graphical elements. The result is beautiful, highly-customized, information-rich patient profiles that meet the requirements for managing a modern clinical trial.
+ 
+Code was developed based on the environments and platforms the authors, Josh Horstman and Richann Jean Watson, had available at the time. Code is not guaranteed to work on all environments and platforms. You are free to use the code and modify to fit your needs. We ask that you just cite where you got the original code from. If you have any questions or need help with some of the logic feel free to contact Josh Horstman at josh@nestedloopconsulting.com or Richann Jean Watson at richann.watson@datarichconsulting.com.
