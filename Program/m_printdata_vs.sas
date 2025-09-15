@@ -1,5 +1,15 @@
-/* utility to print the VS section of the patient profile */
+/********************************************************************************
+*
+* PROGRAM NAME: m_printdata_vs.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Print the VS section of the patient profile
+*
+********************************************************************************/
+
 %macro m_printdata_vs;
+
    %local vitalsvislist numvitalsvisits vitalsvisnum xmin xmax;
 
    /* create a subject-specific visit format for figure x-axis labels */

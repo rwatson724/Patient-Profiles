@@ -1,33 +1,35 @@
+/********************************************************************************
+*
+* PROGRAM NAME: patient_profile.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Main program to create patient profiles
+*
+********************************************************************************/
 
-%if %upcase(&sysuserid) = JMHOR %then %do;
-	%let rootdir = C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles;
-%end;
-%else %do;
-	%let rootdir = C:\Users\gonza\OneDrive - datarichconsulting.com\Desktop\GitHub\Patient-Profiles;
-%end;
+********************************************************************************;
+* Inputs defined by user
+*
+* These items may change from run to run as needed. Code in remaining sections
+* of program may need to be changed initially to configure the profiles for your
+* use, but then would not typically be changed from run to run.
+********************************************************************************;
 
-libname sdtm "&rootdir.\SDTM";
-libname pdata "&rootdir.\pdata";
-libname prevpdat "&rootdir.\pdataold";
+/* Specify subset of subjects to include in profiles */
+%let subj_subset = %str();
 
-filename ppmacros "&rootdir.\Program";
-%let outpath = &rootdir.\Output;
-options mautosource sasautos=(sasautos ppmacros);
+/* Specify whether to highlight new or changed records from prior version (Y or N) */                 
+%let highlight_updates = Y;                
 
-%let rundate = %sysfunc(date(), date9.);
-%let subj_subset = %str();                 ** specify subset of subjects to include in profiles;
-%let highlight_updates = Y;                ** highlight new/changed records since prior run (Y or N);
+/* Specify sections to include in patient profiles in the desired order.
+   For each section specified, a getdata macro and a printdata macro must be defined. */
+%let sectionlist = DM SV AE VS;
 
-/* if highlighting of change is enabled, date of prior run to the use as a basis for comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
-options nomlogic nomprint nosymbolgen;
-ods graphics / reset = all noborder attrpriority = none width = 6in height = 6in;
+/* Specify sections that should be followed by a page break */
+%let pageafter = AE;
 
-%let sectionlist = DM SV AE VS; *DM RP DC SV DS AE MH CM PR MRI ULT QS LB EG VS;
-%let pageafter = AE; *SV AE MH NP QS LB EG;
-
-
-/* set up format to label visits for tables and figures */
-
+/* Set up format to label visits for tables and figures */
 proc format;
 	value vislbl
 		1.0   = 'SCR1'
@@ -77,7 +79,53 @@ proc format;
 	;
 run;
 
-/* retrieve the data for each section */
+
+********************************************************************************;
+* Initialization
+********************************************************************************;
+
+/* identify the location where the program that is currently being executed is saved */
+
+data _null_;
+    length mode $100 __pgmpath $2000 __rootdir $2000;
+
+    /* based on the platform SAS is executed determines which system macro variables are used */
+
+    mode = upcase(symget("sysprocessmode"));
+    /* interactive SAS */
+    if  mode = "SAS DMS SESSION" then __pgmpath = sysget("SAS_EXECFILEPATH");
+    /* SAS EG */
+    else if  mode = "SAS WORKSPACE SERVER" then __pgmpath = symget("_SASPROGRAMFILE");
+    /* batch */
+    else if  mode = "SAS BATCH MODE" then __pgmpath = getoption("sysin");
+ 
+    /* remove the quotes from around the program path name */
+    __pgmpath = strip(dequote(__pgmpath));
+
+    __rootdir = substr(__pgmpath,1,find(__pgmpath,'\Program\','i')-1);
+    
+    call symputx("rootdir",__rootdir);
+run;
+
+libname sdtm "&rootdir.\SDTM";
+libname pdata "&rootdir.\pdata";
+libname prevpdat "&rootdir.\pdataold";
+
+filename ppmacros "&rootdir.\Program";
+%let outpath = &rootdir.\Output;
+options mautosource sasautos=(sasautos ppmacros);
+
+%let rundate = %sysfunc(date(), date9.);
+
+
+/* if highlighting of change is enabled, date of prior run to the use as a basis for comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
+options nomlogic nomprint nosymbolgen;
+ods graphics / reset = all noborder attrpriority = none width = 6in height = 6in;
+
+********************************************************************************;
+* Retrieve the data for each section.
+********************************************************************************;
+
 %macro get_profile_data;
    %do secnum = 1 %to %sysfunc(countw(&sectionlist));
       %let sec = %scan(&sectionlist, &secnum);
@@ -104,7 +152,9 @@ run;
 
 %get_profile_data
 
-/* define custom template to use for patient profiles */
+********************************************************************************;
+* Define custom template to use for patient profiles.
+********************************************************************************;
 
 proc template;
    define style STYLES.SMALLER;
@@ -128,7 +178,9 @@ proc template;
    end;
 run;
 
-/* create patient profile master list in Excel */
+********************************************************************************;
+* Create patient profile master list in Excel.
+********************************************************************************;
 
 /* Get last visit for each patient */
 proc sort data=sdtm.sv out=sv;
@@ -171,7 +223,9 @@ run;
 
 ods excel close;
 
-/* create patient profile output */
+********************************************************************************;
+* Create patient profile output.
+********************************************************************************;
 
 ods _all_ close;
 options nodate nonumber orientation = portrait;
@@ -222,12 +276,18 @@ ods escapechar = '^';
          %let sec = %scan(&sectionlist, &secnum);
          %put === Printing Data for &sec section for Subject &&usubj&i (&&subj&i) ===;
 
+	/* If a lengthy section such as lab data needs to span multiple pages, the example
+           below shows how you might create the output. In this example, we do not have
+           lab data so this code does not execute. */
+
          %if &sec = LB %then %do;
             %m_printdata_lb(labpage = 1,  labtestlist = IGF~ICGF1, grplabel = IGF-1)
             %m_printdata_lb(labpage = 2,  labtestlist = GH~SOMATRO, grplabel = Growth Hormone)
             %m_printdata_lb(labpage = 3,  labtestlist = HORMONES~T3FR HORMONES~T4FR HORMONES~TSH, grplabel = Chemistry Part 1)
             %m_printdata_lb(labpage = 4,  labtestlist = CHEMISTRY~ALB CHEMISTRY~CL CHEMISTRY~PHOS CHEMISTRY~CA, grplabel = Chemistry Part 2)
-            ...
+
+	    /* Additional lab pages here */
+
             %m_printdata_lb(labpage = 20, labtestlist = PREGNANCYTEST~HCG, grplabel = Pregnancy Test)
          %end;
          %else %do;
@@ -235,7 +295,8 @@ ods escapechar = '^';
             %&macro_to_call;
          %end;
 
-         *insert a page break between sections only when specified;
+         /*insert a page break between sections only when specified */
+
          %if %index(&pageafter, &sec) %then ods startpage = yes;
          %else ods startpage = no;
          ;

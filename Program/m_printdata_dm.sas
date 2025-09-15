@@ -1,4 +1,13 @@
-/* utility to print the DM section of the patient profile */
+/********************************************************************************
+*
+* PROGRAM NAME: m_printdata_dm.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Print the DM section of the patient profile
+*
+********************************************************************************/
+
 %macro m_printdata_dm;
 
 	ods proclabel='Demographics';

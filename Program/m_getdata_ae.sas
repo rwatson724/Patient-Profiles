@@ -1,4 +1,13 @@
-/* utility macro to retrieve data needed for AE section of patient profiles */
+/********************************************************************************
+*
+* PROGRAM NAME: m_getdata_ae.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Retrieve data needed for AE section of patient profiles
+*
+********************************************************************************/
+
 %macro m_getdata_ae;
    proc format;
       value $yn
@@ -6,10 +15,10 @@
          'N' = 'No';
    run;
 
-   %supp2par_v1(inlib = SDTM, parent = AE, supp = SUPPAE, outname = aemerge)
+   %addsupp(dsn=AE)
 
    data aefinal;
-      set aemerge;
+      set ae_supp;
       %if &subj_subset ne  %then where &subj_subset; ;
       length _aeterm $200 aestart aeend $20 _aeser $3 _aesev $8 _aerel $8 _aeout $200
              _aeacn $30 _aetrtem $3;
@@ -29,7 +38,7 @@
       %m_add_update_vars(dsetin_curr = aefinal,
                          dsetin_prev = PREVPDAT.PP_AE,
                          dsetout     = aefinal,
-                         keyvarlist  = USUBJID _aeterm,
+                         keyvarlist  = USUBJID _aeterm aedtc,
                          othvarlist  = aestart aeend _aeser aedur _aesev _aerel _aeout _aeacn _aetrtem);
    %end;
 

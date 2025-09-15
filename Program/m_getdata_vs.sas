@@ -1,9 +1,21 @@
-/* utility macro to retrieve data needed for VS section of patient profiles */
+/********************************************************************************
+*
+* PROGRAM NAME: m_getdata_vs.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Retrieve data needed for VS section of patient profiles
+*
+********************************************************************************/
+
 %macro m_getdata_vs;
+
+   %addsupp(dsn=VS)
+
    proc sql;
       create table vsmerge as
       select a.*
-      from SDTM.VS a,
+      from VS_SUPP a,
            SDTM.DM b
       where a.USUBJID = b.USUBJID and not missing(a.VISITNUM)
       order by a.USUBJID, a.VSTESTCD, a.VSTEST, a.VISITNUM, a.VSDTC, a.VSSEQ;
@@ -18,4 +30,5 @@
 	  if visit =: 'UNSCHEDULED' then vislbl = cats('UN',translate(scan(visit,2,' '),'_','.'));
       else vislbl = put(VISITNUM, vislbl.);
    run;
+
 %mend m_getdata_vs;

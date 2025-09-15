@@ -1,5 +1,15 @@
-/* utility to print the AE section of the patient profile */
+/********************************************************************************
+*
+* PROGRAM NAME: m_printdata_ae.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Print the AE section of the patient profile
+*
+********************************************************************************/
+
 %macro m_printdata_ae;
+
    /* get the number of AE records for the current subject */
    proc sql noprint;
       select count(*) into :numaerecs
@@ -15,7 +25,7 @@
          where USUBJID="&&usubj&i";
          columns dummy AESPID
                  %if %nrbquote(&highlight_updates)=Y %then newflag modcols;
-                 ('Adverse Events' _aeterm aestart aeend _aeser aedur _aesev _aerel _aeout _aeacn _aetrtem);
+                 ('Adverse Events' _aeterm aedtc aestart aeend _aeser aedur _aesev _aerel _aeout _aeacn _aetrtem);
          define dummy    / order noprint;
          define AESPID   / order noprint;
          %if %nrbquote(&highlight_updates)=Y %then %do;
@@ -23,6 +33,7 @@
             define modcols   / display noprint;
          %end;
          define _aeterm   / display style=[cellwidth=1.5in just=l] 'Sponsor Defined~Identifier and~Verbatim Term';
+		 define aedtc     / noprint;
          define aestart   / display style=[cellwidth=0.6in just=c] 'Start~Date~(Day)';
          define aeend     / display style=[cellwidth=0.6in just=c] 'End~Date~(Day)';
          define _aeser    / display style=[cellwidth=0.4in just=c] 'Ser-~ious?';

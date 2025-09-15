@@ -1,8 +1,19 @@
-/* utility macro to retrieve data needed for DM section of patient profiles */
+/********************************************************************************
+*
+* PROGRAM NAME: m_getdata_dm.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Retrieve data needed for DM section of patient profiles
+*
+********************************************************************************/
+
 %macro m_getdata_dm;
 
+   %addsupp(dsn=DM)
+
    data dmfinal;
-      set sdtm.dm;
+      set dm_supp;
       %if &subj_subset ne  %then where &subj_subset; ;
    run;
 

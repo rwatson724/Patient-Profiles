@@ -1,5 +1,7 @@
 %*****************************************************************************;
-%* Macro  : m_minvarlen                                                      *;
+%* Program: m_minvarlen.sas                                                  *;
+%*                                                                           *;
+%* Author : Joshua Horstman                                                  *;
 %*                                                                           *;
 %* Purpose: Minimize the lengths of the character variables in a dataset by  *;
 %*          reducing each one to the length of its longest value.            *;

@@ -1,3 +1,15 @@
+/********************************************************************************
+*
+* PROGRAM NAME: m_add_update_vars.sas
+* AUTHORS     : Josh Horstman and Richann Watson
+* DATE        : May 16, 2025
+*
+* PURPOSE     : Compare current version of data against previous version and 
+*               add variables MODCOLS and NEWFLAG indicating which columns
+*               have changed and/or which rows are new.
+*
+********************************************************************************/
+
 %macro m_add_update_vars(
 	dsetin_curr=,
 	dsetin_prev=,

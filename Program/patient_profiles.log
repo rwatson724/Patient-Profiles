@@ -1,0 +1,3784 @@
+1                                        The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: Copyright (c) 2025 by SAS Institute Inc., Cary, NC, USA. 
+NOTE: SAS (r) Proprietary Software 9.4 (TS1M9) 
+      Licensed to MIDWEST SAS USERS GROUP INC, Site 70342576.
+NOTE: This session is executing on the X64_WIN+HOME  platform.
+
+
+
+NOTE: Analytical products:
+      
+      SAS/STAT 15.4
+
+NOTE: Additional host information:
+
+ X64_WIN+HOME WIN 10.0.22631  Workstation
+
+NOTE: SAS initialization used:
+      real time           0.27 seconds
+      cpu time            0.03 seconds
+      
+1          /********************************************************************************
+2          *
+3          * PROGRAM NAME: patient_profile.sas
+4          * AUTHORS     : Josh Horstman and Richann Watson
+5          * DATE        : May 16, 2025
+6          *
+7          * PURPOSE     : Main program to create patient profiles
+8          *
+9          ********************************************************************************/
+10         
+11         ********************************************************************************;
+12         * Inputs defined by user
+13         *
+14         * These items may change from run to run as needed. Code in remaining sections
+15         * of program may need to be changed initially to configure the profiles for your
+16         * use, but then would not typically be changed from run to run.
+17         ********************************************************************************;
+18         
+19         /* Specify subset of subjects to include in profiles */
+20         %let subj_subset = %str();
+21         
+22         /* Specify whether to highlight new or changed records from prior version (Y or N) */
+23         %let highlight_updates = Y;
+24         
+25         /* Specify sections to include in patient profiles in the desired order.
+26            For each section specified, a getdata macro and a printdata macro must be defined.
+26       !  */
+27         %let sectionlist = DM SV AE VS;
+28         
+29         /* Specify sections that should be followed by a page break */
+30         %let pageafter = AE;
+31         
+32         /* Set up format to label visits for tables and figures */
+33         proc format;
+2                                        The SAS System         15:29 Monday, September 15, 2025
+
+34         	
+34       !  value vislbl
+35         		1.0   = 'SCR1'
+36         		2.0   = 'SCR2'
+37         		3.0   = 'BSLN'
+38         		3.5   = 'ECPL'
+39         		4.0   = 'WK02'
+40         		5.0   = 'WK04'
+41         		6.0   = 'ECRM'
+42         		7.0   = 'WK06'
+43         		8.0   = 'WK08'
+44         		8.1   = 'WK10'
+45         		9.0   = 'WK12'
+46         		9.1   = 'WK14'
+47         		10.0  = 'WK16'
+48         		10.1  = 'WK18'
+49         		11.0  = 'WK20'
+50         		11.1  = 'WK22'
+51         		12.0  = 'WK24'
+52         		13.0  = 'WK26'
+53         		101.0 = 'AEFU'
+54         		201.0 = 'RETR'
+55         		501.0 = 'RAFU'
+56         	;
+NOTE: Format VISLBL has been output.
+57         	
+57       !  invalue visord
+58         		'SCR1' =  1
+59         		'SCR2' =  2
+60         		'BSLN' =  3
+61         		'ECPL' =  4
+62         		'WK02' =  5
+63         		'WK04' =  6
+64         		'ECRM' =  7
+65         		'WK06' =  8
+66         		'WK08' =  9
+67         		'WK10' = 10
+68         		'WK12' = 11
+69         		'WK14' = 12
+70         		'WK16' = 13
+71         		'WK18' = 14
+72         		'WK20' = 15
+73         		'WK22' = 16
+74         		'WK24' = 17
+75         		'WK26' = 18
+76         		'AEFU' = 19
+77         		'RETR' = 20
+78         		'RAFU' = 21
+79         	;
+NOTE: Informat VISORD has been output.
+80         run;
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+3                                        The SAS System         15:29 Monday, September 15, 2025
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+81         
+82         
+83         ********************************************************************************;
+84         * Initialization
+85         ********************************************************************************;
+86         
+87         /* identify the location where the program that is currently being executed is saved
+87       ! */
+88         
+89         data _null_;
+90             length mode $100 __pgmpath $2000 __rootdir $2000;
+91         
+92             /* based on the platform SAS is executed determines which system macro variables
+92       ! are used */
+93         
+94             mode = upcase(symget("sysprocessmode"));
+95             /* interactive SAS */
+96             if  mode = "SAS DMS SESSION" then __pgmpath = sysget("SAS_EXECFILEPATH");
+97             /* SAS EG */
+98             else if  mode = "SAS WORKSPACE SERVER" then __pgmpath = symget("_SASPROGRAMFILE")
+98       ! ;
+99             /* batch */
+100            else if  mode = "SAS BATCH MODE" then __pgmpath = getoption("sysin");
+101        
+102            /* remove the quotes from around the program path name */
+103            __pgmpath = strip(dequote(__pgmpath));
+104        
+105            __rootdir = substr(__pgmpath,1,find(__pgmpath,'\Program\','i')-1);
+106        
+107            call symputx("rootdir",__rootdir);
+108        run;
+
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+109        
+110        libname sdtm "&rootdir.\SDTM";
+NOTE: Libref SDTM was successfully assigned as follows: 
+      Engine:        V9 
+      Physical Name: C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\SDTM
+111        libname pdata "&rootdir.\pdata";
+NOTE: Libref PDATA was successfully assigned as follows: 
+      Engine:        V9 
+      Physical Name: C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\pdata
+112        libname prevpdat "&rootdir.\pdataold";
+NOTE: Libref PREVPDAT was successfully assigned as follows: 
+      Engine:        V9 
+4                                        The SAS System         15:29 Monday, September 15, 2025
+
+      Physical Name: C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\pdataold
+113        
+114        filename ppmacros "&rootdir.\Program";
+115        %let outpath = &rootdir.\Output;
+116        options mautosource sasautos=(sasautos ppmacros);
+117        
+118        %let rundate = %sysfunc(date(), date9.);
+119        
+120        
+121        /* if highlighting of change is enabled, date of prior run to the use as a basis for
+121      ! comparsion is specified in COMPDATE macro variable in the INIT.SAS file */
+122        options nomlogic nomprint nosymbolgen;
+123        ods graphics / reset = all noborder attrpriority = none width = 6in height = 6in;
+124        
+125        ********************************************************************************;
+126        * Retrieve the data for each section.
+127        ********************************************************************************;
+128        
+129        %macro get_profile_data;
+130           %do secnum = 1 %to %sysfunc(countw(&sectionlist));
+131              %let sec = %scan(&sectionlist, &secnum);
+132              %put === Getting Data for &sec section ===;
+133        
+134              %let macro_to_call = m_getdata_&sec;
+135              %&macro_to_call;
+136        
+137              /* add dummy variable to final data set for use in removing unwanted PDF
+137      ! bookmarks */
+138              data &sec.final;
+139                 set &sec.final;
+140                 dummy = 1;
+141              run;
+142        
+143              /* create empty shell of QC output data set for this section */
+144              /* PROC REPORT output will be appeneded later one subject at a time */
+145              data PDATA.PP_&sec;
+146                 length USUBJID $23;
+147                 call missing(USUBJID);
+148                 stop;
+149              run;
+150           %end;
+151        %mend get_profile_data;
+152        
+153        %get_profile_data
+=== Getting Data for DM section ===
+NOTE: No rows were selected.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1197 observations read from the data set SDTM.SUPPDM.
+5                                        The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: The data set WORK.__SUPPDM has 1197 observations and 10 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1197 observations read from the data set WORK.__SUPPDM.
+NOTE: 1196 observations with duplicate key values were deleted.
+NOTE: The data set WORK.SUPPRSIDS has 1 observations and 1 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.__DMVARS created, with 25 rows and 3 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 25 observations read from the data set WORK.__DMVARS.
+NOTE: There were 1 observations read from the data set WORK.SUPPRSIDS.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1197 observations read from the data set WORK.__SUPPDM.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: CALL EXECUTE generated line.
+1         + data NONE    (drop = IDVAR:); set SDTM.SUPPDM;
+2         + where IDVAR = "        ";
+3         + run;
+
+NOTE: There were 1197 observations read from the data set SDTM.SUPPDM.
+      WHERE IDVAR='        ';
+NOTE: The data set WORK.NONE has 1197 observations and 8 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+BYVARS=NONE
+
+NOTE: Sort order of input data set has been verified.
+6                                        The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: Input data set is already sorted; it has been copied to the output data set.
+NOTE: There were 306 observations read from the data set SDTM.DM.
+NOTE: The data set WORK.DM0 has 306 observations and 25 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1197 observations read from the data set WORK.NONE.
+NOTE: The data set WORK.NONE has 1197 observations and 8 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1197 observations read from the data set WORK.NONE.
+NOTE: The data set WORK.TNONE has 254 observations and 7 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 254 observations read from the data set WORK.TNONE.
+NOTE: There were 306 observations read from the data set WORK.DM0.
+NOTE: The data set WORK.DM1 has 306 observations and 31 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 306 observations read from the data set WORK.DM1.
+NOTE: The data set WORK.DM_SUPP has 306 observations and 31 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 306 observations read from the data set WORK.DM_SUPP.
+NOTE: The data set WORK.DMFINAL has 306 observations and 31 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 10 observations read from the data set PREVPDAT.PP_DM.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 10 observations and 8 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+7                                        The SAS System         15:29 Monday, September 15, 2025
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 306 observations read from the data set WORK.DMFINAL.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 306 observations and 31 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Line generated by the invoked macro "M_ADD_UPDATE_VARS".
+153        ; run;
+           _
+           414
+
+WARNING 414-185: No DROP variables found, statement is ignored.
+
+NOTE: There were 306 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 10 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.DMFINAL has 306 observations and 33 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 306 observations read from the data set WORK.DMFINAL.
+NOTE: The data set WORK.DMFINAL has 306 observations and 34 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: The data set PDATA.PP_DM has 0 observations and 1 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Getting Data for SV section ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3559 observations read from the data set SDTM.SV.
+NOTE: The data set WORK.SV_SUPP has 3559 observations and 8 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+8                                        The SAS System         15:29 Monday, September 15, 2025
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3559 observations read from the data set WORK.SV_SUPP.
+NOTE: The data set WORK.SV has 3559 observations and 8 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3559 observations read from the data set WORK.SV.
+NOTE: The data set WORK.SVFINAL has 3559 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 10 observations read from the data set PREVPDAT.PP_DM.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 10 observations and 8 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3559 observations read from the data set WORK.SVFINAL.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 3559 observations and 9 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Line generated by the invoked macro "M_ADD_UPDATE_VARS".
+153        ; run;
+           _
+           414
+
+WARNING 414-185: No DROP variables found, statement is ignored.
+
+NOTE: There were 3559 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 10 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.SVFINAL has 3559 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3559 observations read from the data set WORK.SVFINAL.
+NOTE: The data set WORK.SVFINAL has 3559 observations and 12 variables.
+9                                        The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: The data set PDATA.PP_SV has 0 observations and 1 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Getting Data for AE section ===
+NOTE: Format $YN has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set SDTM.SUPPAE.
+NOTE: The data set WORK.__SUPPAE has 1191 observations and 10 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.__SUPPAE.
+NOTE: 1190 observations with duplicate key values were deleted.
+NOTE: The data set WORK.SUPPRSIDS has 1 observations and 1 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.__AEVARS created, with 35 rows and 3 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 35 observations read from the data set WORK.__AEVARS.
+NOTE: There were 1 observations read from the data set WORK.SUPPRSIDS.
+NOTE: DATA statement used (Total process time):
+10                                       The SAS System         15:29 Monday, September 15, 2025
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.__SUPPAE.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: CALL EXECUTE generated line.
+1         + data AESEQ   (drop = IDVAR:); set SDTM.SUPPAE;
+2         + where IDVAR = "AESEQ   ";
+3         + length AESEQ 8;
+4         + if 2 = 1 then AESEQ    = IDVARVAL;
+5         + else if 2 = 2 then AESEQ    = input(IDVARVAL, best.);
+6         + run;
+
+NOTE: Character values have been converted to numeric values at the places given by: 
+      (Line):(Column).
+      4:27   
+NOTE: There were 1191 observations read from the data set SDTM.SUPPAE.
+      WHERE IDVAR='AESEQ   ';
+NOTE: The data set WORK.AESEQ has 1191 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+BYVARS=AESEQ
+
+NOTE: Input data set is not in sorted order.
+NOTE: There were 1191 observations read from the data set SDTM.AE.
+NOTE: The data set WORK.AE0 has 1191 observations and 35 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.AESEQ.
+NOTE: The data set WORK.AESEQ has 1191 observations and 9 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.AESEQ.
+NOTE: The data set WORK.TAESEQ has 1191 observations and 3 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+11                                       The SAS System         15:29 Monday, September 15, 2025
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.TAESEQ.
+NOTE: There were 1191 observations read from the data set WORK.AE0.
+NOTE: The data set WORK.AE1 has 1191 observations and 36 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.AE1.
+NOTE: The data set WORK.AE_SUPP has 1191 observations and 36 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.AE_SUPP.
+NOTE: The data set WORK.AEFINAL has 1191 observations and 46 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 28 observations read from the data set PREVPDAT.PP_AE.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 28 observations and 14 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK.AEFINAL.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 1191 observations and 46 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1191 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 28 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.AEFINAL has 1191 observations and 48 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+12                                       The SAS System         15:29 Monday, September 15, 2025
+
+
+NOTE: There were 1191 observations read from the data set WORK.AEFINAL.
+NOTE: The data set WORK.AEFINAL has 1191 observations and 49 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: The data set PDATA.PP_AE has 0 observations and 1 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Getting Data for VS section ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 29643 observations read from the data set SDTM.VS.
+NOTE: The data set WORK.VS_SUPP has 29643 observations and 24 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.VSMERGE created, with 29643 rows and 24 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 29643 observations read from the data set WORK.VSMERGE.
+NOTE: The data set WORK.VSFINAL has 13237 observations and 25 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 13237 observations read from the data set WORK.VSFINAL.
+NOTE: The data set WORK.VSFINAL has 13237 observations and 26 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+13                                       The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: The data set PDATA.PP_VS has 0 observations and 1 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+154        
+155        ********************************************************************************;
+156        * Define custom template to use for patient profiles.
+157        ********************************************************************************;
+158        
+159        proc template;
+160           define style STYLES.SMALLER;
+161              parent = STYLES.PRINTER;
+162              * reduce all sizes by 2pt;
+163              class fonts from fonts / 'TitleFont2'          = ("Times", 10pt, Bold Italic)
+164                                       'TitleFont'           = ("Times", 11pt, Bold Italic)
+165                                       'StrongFont'          = ("Times", 8pt, Bold)
+166                                       'EmphasisFont'        = ("Times", 8pt, Italic)
+167                                       'FixedStrongFont'     = ("Courier New, Courier", 7pt,
+167      ! Bold)
+168                                       'FixedEmphasisFont'   = ("Courier New, Courier", 7pt,
+168      ! Italic)
+169                                       'FixedHeadingFont'    = ("Courier New, Courier", 7pt,
+169      ! Bold)
+170                                       'BatchFixedFont'      = ("SAS Monospace, Courier New,
+170      ! Courier", 5pt)
+171                                       'HeadingFont'         = ("Times", 9pt, Bold)
+172                                       'HeadingEmphasisFont' = ("Times", 9pt, Bold Italic)
+173                                       'DocFont'             = ("Times", 8pt);
+174              class table from output / rules = ALL
+175                                        cellpadding = 2pt
+176                                        cellspacing = 0.25pt
+177                                        borderwidth = 0.75pt;
+178           end;
+NOTE: Overwriting existing template/link: Styles.Smaller
+NOTE: STYLE 'Styles.Smaller' has been saved to: SASUSER.TEMPLAT
+179        run;
+NOTE: PROCEDURE TEMPLATE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+180        
+181        ********************************************************************************;
+182        * Create patient profile master list in Excel.
+183        ********************************************************************************;
+184        
+185        /* Get last visit for each patient */
+186        proc sort data=sdtm.sv out=sv;
+187        	by usubjid visitnum;
+188        run;
+
+14                                       The SAS System         15:29 Monday, September 15, 2025
+
+NOTE: There were 3559 observations read from the data set SDTM.SV.
+NOTE: The data set WORK.SV has 3559 observations and 8 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+189        data lastvis;
+190        	set sv;
+191        	by usubjid;
+192        	if last.usubjid;
+193        	length visabbr $4;
+194        	visabbr = put(visitnum,vislbl.);
+195        run;
+
+NOTE: There were 3559 observations read from the data set WORK.SV.
+NOTE: The data set WORK.LASTVIS has 306 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+196        
+197        proc sql;
+198           create table profilelist as
+199           select a.USUBJID label = 'Unique Subject ID',
+200                  a.SUBJID label = 'Subject ID',
+201                  scan(a.RFXSTDTC, 1, 'T') as firstdose label='First Dose Date',
+202        		  b.DSDECOD as subjstatus label = 'Subject Status' length = 50,
+203                  coalescec(c.VISIT, 'No visit records') as lastvis label = 'Last Visit'
+203      ! length = 50,
+204        	      c.visabbr
+205           from (select * from dmfinal where ACTARMCD not in ('Scrnfail','')) a
+206                left join
+207        	        (select USUBJID, DSDECOD
+208        	         from SDTM.DS
+209        	         where DSCAT = 'DISPOSITION EVENT') b
+210        	        on a.USUBJID = b.USUBJID
+211                left join
+212        		    lastvis c
+213        		    on a.USUBJID = c.USUBJID;
+NOTE: Table WORK.PROFILELIST created, with 254 rows and 6 columns.
+
+214        quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+215        
+216        ods listing close;
+217        ods excel file="&outpath.\patient_profile_master_list_&rundate..xlsx"
+218                  options (sheet_name = "Patient Profile List");
+15                                       The SAS System         15:29 Monday, September 15, 2025
+
+219        
+220        proc report data = profilelist;
+221        	columns usubjid subjid firstdose subjstatus lastvis;
+222        run;
+
+NOTE: There were 254 observations read from the data set WORK.PROFILELIST.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.13 seconds
+      cpu time            0.04 seconds
+      
+
+223        
+224        ods excel close;
+NOTE: Writing EXCEL file: 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\patient_profile_master_li
+      st_15SEP2025.xlsx
+225        
+226        ********************************************************************************;
+227        * Create patient profile output.
+228        ********************************************************************************;
+229        
+230        ods _all_ close;
+231        options nodate nonumber orientation = portrait;
+232        ods escapechar = '^';
+233        
+234        %macro create_profile_outputs();
+235           proc sql noprint;
+236              select distinct USUBJID, SUBJID
+237                     into
+238                     :usubj1 - , :subj1 -
+239              from profilelist
+240              order by USUBJID;
+241              %let subjcount = &sqlobs;
+242           quit;
+243        
+244           %do i = 1 %to 10;*&subjcount;
+245              proc sql noprint;
+246                 select coalescec(firstdose, 'No Data'),
+247                        subjstatus, lastvis, visabbr
+248                        into
+249                        :firstdose, :subjstatus, :lastvis, :visabbr trimmed
+250                  from profilelist
+251                  where USUBJID = "&&usubj&i";
+252              quit;
+253        
+254              %put;
+255              %put ******************************************************;
+256              %put ******************************************************;
+257              %put **;
+258              %put ** Generating Patient Profile &i of &subjcount;
+259              %put ** USUBJID: &&usubj&i;
+260              %put ** SUBJID:  &&subj&i;
+261              %put **;
+                                         The SAS System
+
+262              %put ******************************************************;
+263              %put ******************************************************;
+264              %put;
+265        
+266              ods pdf file = "&outpath\profile_&&subj&i.._&visabbr._&rundate..pdf"
+267                      startpage=no nogtitle nogfootnote pdftoc=1 style=STYLES.SMALLER;
+268        
+269              title1 j = l "Study: CDISCPILOT01"           j = r "Page ^{thispage} of
+269      ! ^{lastpage}";
+270              title2 j = l "Subject: &&usubj&i (&&subj&i)" j = r "First Dose Date:
+270      ! &firstdose";
+271              title3 j = l "Status: &subjstatus"           j = r "Current Visit: &lastvis";
+272        
+273              footnote "FULLY VALIDATED, For Internal Use Only";
+274        
+275              %do secnum = 1 %to %sysfunc(countw(&sectionlist));
+276                 %let sec = %scan(&sectionlist, &secnum);
+277                 %put === Printing Data for &sec section for Subject &&usubj&i (&&subj&i) ===
+277      ! ;
+278        
+279        	/* If a lengthy section such as lab data needs to span multiple pages, the example
+280                   below shows how you might create the output. In this example, we do not
+280      ! have
+281                   lab data so this code does not execute. */
+282        
+283                 %if &sec = LB %then %do;
+284                    %m_printdata_lb(labpage = 1,  labtestlist = IGF~ICGF1, grplabel = IGF-1)
+285                    %m_printdata_lb(labpage = 2,  labtestlist = GH~SOMATRO, grplabel = Growth
+285      !  Hormone)
+286                    %m_printdata_lb(labpage = 3,  labtestlist = HORMONES~T3FR HORMONES~T4FR
+286      ! HORMONES~TSH, grplabel = Chemistry Part 1)
+287                    %m_printdata_lb(labpage = 4,  labtestlist = CHEMISTRY~ALB CHEMISTRY~CL
+287      ! CHEMISTRY~PHOS CHEMISTRY~CA, grplabel = Chemistry Part 2)
+288        
+289        	    /* Additional lab pages here */
+290        
+291                    %m_printdata_lb(labpage = 20, labtestlist = PREGNANCYTEST~HCG, grplabel =
+291      !  Pregnancy Test)
+292                 %end;
+293                 %else %do;
+294                    %let macro_to_call = m_printdata_&sec;
+295                    %&macro_to_call;
+296                 %end;
+297        
+298                 /*insert a page break between sections only when specified */
+299        
+300                 %if %index(&pageafter, &sec) %then ods startpage = yes;
+301                 %else ods startpage = no;
+302                 ;
+303              %end;
+304        
+305              ods pdf close;
+306           %end;
+                                         The SAS System
+
+307        
+308           /* set length of all character variables in all QC data sets to the length of the
+308      ! longest value to faciliate QC */
+309        
+310           proc sql noprint;
+311              select distinct MEMNAME into :ds1 -
+312              from DICTIONARY.TABLES
+313              where LIBNAME = 'PDATA' and MEMTYPE = 'DATA' and NOBS > 0;
+314              %let dscount = &sqlobs;
+315           quit;
+316        
+317           %do dsnum = 1 %to &dscount;
+318              %m_minvarlen(indsn = PDATA.&&ds&dsnum)
+319           %end;
+320        
+321        %mend create_profile_outputs;
+322        
+323        %create_profile_outputs;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 1 of 254
+** USUBJID: 01-701-1015
+** SUBJID:  1015
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1015_WK26_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1015 (1015) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1015';
+NOTE: The data set WORK.QC_DM_1 has 2 observations and 11 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.27 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+
+NOTE: There were 0 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_1.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 1 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1015 (1015) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 16 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1015';
+NOTE: The data set WORK.QC_SV_1 has 17 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 0 observations read from the data set PDATA.PP_SV.
+NOTE: There were 16 observations read from the data set WORK.QC_SV_1.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 16 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1015 (1015) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 3 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1015';
+NOTE: The data set WORK.QC_AE_1 has 4 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 0 observations read from the data set PDATA.PP_AE.
+NOTE: There were 3 observations read from the data set WORK.QC_AE_1.
+                                         The SAS System
+
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 3 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1015 (1015) ===
+NOTE: Table WORK.VSFIGFMT created, with 16 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 16 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1015') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 16 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1015';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 16 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+                                         The SAS System
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 18 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_1 has 6 observations and 19 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 67 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 80 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 80 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 147 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 147 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 147 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           1.56 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 147 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 0 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_1.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 5 observations and 19 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1015_WK26_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 2 of 254
+** USUBJID: 01-701-1023
+** SUBJID:  1023
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1023_RETR_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1023 (1023) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.24 seconds
+      cpu time            0.00 seconds
+                                         The SAS System
+
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1023';
+NOTE: The data set WORK.QC_DM_2 has 2 observations and 11 variables.
+
+
+NOTE: There were 1 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_2.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 2 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1023 (1023) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 9 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1023';
+NOTE: The data set WORK.QC_SV_2 has 10 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 16 observations read from the data set PDATA.PP_SV.
+NOTE: There were 9 observations read from the data set WORK.QC_SV_2.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 25 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1023 (1023) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 4 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1023';
+NOTE: The data set WORK.QC_AE_2 has 5 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+
+NOTE: There were 3 observations read from the data set PDATA.PP_AE.
+NOTE: There were 4 observations read from the data set WORK.QC_AE_2.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 7 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1023 (1023) ===
+NOTE: Table WORK.VSFIGFMT created, with 8 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 8 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1023') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+                                         The SAS System
+
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 32 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 32 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 9 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1023';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 9 variables.
+                                         The SAS System
+
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_2 has 6 observations and 12 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 32 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 40 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 40 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 72 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+
+NOTE: There were 72 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 72 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.41 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 72 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 5 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_2.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 10 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1023_RETR_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 3 of 254
+** USUBJID: 01-701-1028
+** SUBJID:  1028
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1028_WK26_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1028 (1028) ===
+                                         The SAS System
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.25 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1028';
+NOTE: The data set WORK.QC_DM_3 has 2 observations and 11 variables.
+
+
+NOTE: There were 2 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_3.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 3 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1028 (1028) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 18 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1028';
+NOTE: The data set WORK.QC_SV_3 has 19 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 25 observations read from the data set PDATA.PP_SV.
+NOTE: There were 18 observations read from the data set WORK.QC_SV_3.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 43 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1028 (1028) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 2 observations read from the data set WORK.AEFINAL.
+                                         The SAS System
+
+      WHERE USUBJID='01-701-1028';
+NOTE: The data set WORK.QC_AE_3 has 3 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 7 observations read from the data set PDATA.PP_AE.
+NOTE: There were 2 observations read from the data set WORK.QC_AE_3.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 9 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1028 (1028) ===
+NOTE: Table WORK.VSFIGFMT created, with 18 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 18 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1028') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 16 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1028';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 16 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 18 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_3 has 6 observations and 19 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 67 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 90 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET2.
+                                         The SAS System
+
+NOTE: There were 90 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 157 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 157 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 157 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.51 seconds
+      cpu time            0.01 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 157 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 10 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_3.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 15 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1028_WK26_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 4 of 254
+** USUBJID: 01-701-1033
+** SUBJID:  1033
+**
+******************************************************
+******************************************************
+                                         The SAS System
+
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1033_RETR_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1033 (1033) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.24 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1033';
+NOTE: The data set WORK.QC_DM_4 has 2 observations and 11 variables.
+
+
+NOTE: There were 3 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_4.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 4 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1033 (1033) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 7 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1033';
+NOTE: The data set WORK.QC_SV_4 has 8 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 43 observations read from the data set PDATA.PP_SV.
+NOTE: There were 7 observations read from the data set WORK.QC_SV_4.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 50 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1033 (1033) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+=== Printing Data for VS section for Subject 01-701-1033 (1033) ===
+NOTE: Table WORK.VSFIGFMT created, with 7 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 7 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1033') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 32 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+                                         The SAS System
+
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 32 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 9 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1033';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 9 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+                                         The SAS System
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_4 has 6 observations and 12 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 32 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 35 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 32 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 35 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 67 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 67 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+                                         The SAS System
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.45 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 67 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 15 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_4.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 20 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1033_RETR_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 5 of 254
+** USUBJID: 01-701-1034
+** SUBJID:  1034
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1034_WK26_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1034 (1034) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.23 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1034';
+NOTE: The data set WORK.QC_DM_5 has 2 observations and 11 variables.
+
+
+                                         The SAS System
+
+NOTE: There were 4 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_5.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 5 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1034 (1034) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 17 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1034';
+NOTE: The data set WORK.QC_SV_5 has 18 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 50 observations read from the data set PDATA.PP_SV.
+NOTE: There were 17 observations read from the data set WORK.QC_SV_5.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 67 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1034 (1034) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 2 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1034';
+NOTE: The data set WORK.QC_AE_5 has 3 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 9 observations read from the data set PDATA.PP_AE.
+NOTE: There were 2 observations read from the data set WORK.QC_AE_5.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 11 observations and 15 variables.
+                                         The SAS System
+
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1034 (1034) ===
+NOTE: Table WORK.VSFIGFMT created, with 17 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 17 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 63 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1034') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 63 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 63 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 63 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 63 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 15 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1034';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 15 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+                                         The SAS System
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_5 has 6 observations and 18 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 63 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 85 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 63 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 85 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 148 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 148 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 148 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.42 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 148 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 20 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_5.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 25 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1034_WK26_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 6 of 254
+** USUBJID: 01-701-1047
+** SUBJID:  1047
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1047_RETR_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1047 (1047) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.24 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1047';
+NOTE: The data set WORK.QC_DM_6 has 2 observations and 11 variables.
+
+
+NOTE: There were 5 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_6.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 6 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1047 (1047) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 9 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1047';
+NOTE: The data set WORK.QC_SV_6 has 10 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set PDATA.PP_SV.
+NOTE: There were 9 observations read from the data set WORK.QC_SV_6.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 76 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1047 (1047) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 4 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1047';
+NOTE: The data set WORK.QC_AE_6 has 5 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+                                         The SAS System
+
+
+NOTE: There were 11 observations read from the data set PDATA.PP_AE.
+NOTE: There were 4 observations read from the data set WORK.QC_AE_6.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 15 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1047 (1047) ===
+NOTE: Table WORK.VSFIGFMT created, with 8 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 8 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 36 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1047') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+                                         The SAS System
+
+NOTE: The data set WORK.VSSUBSET has 36 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 36 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 36 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 36 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 10 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1047';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 10 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+                                         The SAS System
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_6 has 6 observations and 13 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 36 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 40 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 36 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 40 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 76 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+                                         The SAS System
+
+
+NOTE: There were 76 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 76 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.39 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 76 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 25 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_6.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 30 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1047_RETR_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 7 of 254
+** USUBJID: 01-701-1097
+** SUBJID:  1097
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1097_WK26_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1097 (1097) ===
+                                         The SAS System
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.23 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1097';
+NOTE: The data set WORK.QC_DM_7 has 2 observations and 11 variables.
+
+
+NOTE: There were 6 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_7.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 7 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1097 (1097) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 17 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1097';
+NOTE: The data set WORK.QC_SV_7 has 18 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 76 observations read from the data set PDATA.PP_SV.
+NOTE: There were 17 observations read from the data set WORK.QC_SV_7.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 93 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1097 (1097) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 10 observations read from the data set WORK.AEFINAL.
+                                         The SAS System
+
+      WHERE USUBJID='01-701-1097';
+NOTE: The data set WORK.QC_AE_7 has 11 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 15 observations read from the data set PDATA.PP_AE.
+NOTE: There were 10 observations read from the data set WORK.QC_AE_7.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 25 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1097 (1097) ===
+NOTE: Table WORK.VSFIGFMT created, with 17 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 17 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1097') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 16 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1097';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 16 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 18 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_7 has 6 observations and 19 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 67 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 85 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET2.
+                                         The SAS System
+
+NOTE: There were 85 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 152 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 152 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 152 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.37 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 152 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 30 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_7.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 35 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1097_WK26_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 8 of 254
+** USUBJID: 01-701-1111
+** SUBJID:  1111
+                                         The SAS System
+
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1111_RETR_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1111 (1111) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.25 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1111';
+NOTE: The data set WORK.QC_DM_8 has 2 observations and 11 variables.
+
+
+NOTE: There were 7 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_8.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 8 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1111 (1111) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 6 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1111';
+NOTE: The data set WORK.QC_SV_8 has 7 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 93 observations read from the data set PDATA.PP_SV.
+NOTE: There were 6 observations read from the data set WORK.QC_SV_8.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 99 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1111 (1111) ===
+NOTE: PROCEDURE SQL used (Total process time):
+                                         The SAS System
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 8 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1111';
+NOTE: The data set WORK.QC_AE_8 has 9 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 25 observations read from the data set PDATA.PP_AE.
+NOTE: There were 8 observations read from the data set WORK.QC_AE_8.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 33 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1111 (1111) ===
+NOTE: Table WORK.VSFIGFMT created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1111') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 23 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 23 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 7 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1111';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 7 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_8 has 6 observations and 10 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 23 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 30 rows and 4 columns.
+                                         The SAS System
+
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 30 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 53 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 53 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 53 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.37 seconds
+      cpu time            0.00 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 53 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 35 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_8.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 40 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1111_RETR_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+******************************************************
+                                         The SAS System
+
+******************************************************
+**
+** Generating Patient Profile 9 of 254
+** USUBJID: 01-701-1115
+** SUBJID:  1115
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1115_RETR_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1115 (1115) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.25 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1115';
+NOTE: The data set WORK.QC_DM_9 has 2 observations and 11 variables.
+
+
+NOTE: There were 8 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_9.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 9 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1115 (1115) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 12 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1115';
+NOTE: The data set WORK.QC_SV_9 has 13 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 99 observations read from the data set PDATA.PP_SV.
+NOTE: There were 12 observations read from the data set WORK.QC_SV_9.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 111 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1115 (1115) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 9 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1115';
+NOTE: The data set WORK.QC_AE_9 has 10 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 33 observations read from the data set PDATA.PP_AE.
+NOTE: There were 9 observations read from the data set WORK.QC_AE_9.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 42 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1115 (1115) ===
+NOTE: Table WORK.VSFIGFMT created, with 11 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 11 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.00 seconds
+      
+
+                                         The SAS System
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 46 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1115') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 46 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 46 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 46 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 46 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 12 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+                                         The SAS System
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1115';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 12 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 14 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.10 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_9 has 6 observations and 15 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.VSSUBSET2 created, with 46 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+                                         The SAS System
+
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 55 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 46 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 55 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 101 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 101 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 101 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.35 seconds
+      cpu time            0.07 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 101 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 40 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_9.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 45 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1115_RETR_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+                                         The SAS System
+
+      cpu time            0.00 seconds
+      
+
+
+******************************************************
+******************************************************
+**
+** Generating Patient Profile 10 of 254
+** USUBJID: 01-701-1118
+** SUBJID:  1118
+**
+******************************************************
+******************************************************
+
+NOTE: Writing ODS PDF output to DISK destination 
+      "C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1118_WK26_15SEP2
+      025.pdf", printer "PDF".
+=== Printing Data for DM section for Subject 01-701-1118 (1118) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.26 seconds
+      cpu time            0.03 seconds
+      
+NOTE: There were 1 observations read from the data set WORK.DMFINAL.
+      WHERE USUBJID='01-701-1118';
+NOTE: The data set WORK.QC_DM_10 has 2 observations and 11 variables.
+
+
+NOTE: There were 9 observations read from the data set PDATA.PP_DM.
+NOTE: There were 1 observations read from the data set WORK.QC_DM_10.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_DM has 10 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for SV section for Subject 01-701-1118 (1118) ===
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 18 observations read from the data set WORK.SVFINAL.
+      WHERE USUBJID='01-701-1118';
+NOTE: The data set WORK.QC_SV_10 has 19 observations and 7 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 111 observations read from the data set PDATA.PP_SV.
+                                         The SAS System
+
+NOTE: There were 18 observations read from the data set WORK.QC_SV_10.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_SV has 129 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for AE section for Subject 01-701-1118 (1118) ===
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: There were 1 observations read from the data set WORK.AEFINAL.
+      WHERE USUBJID='01-701-1118';
+NOTE: The data set WORK.QC_AE_10 has 2 observations and 16 variables.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 42 observations read from the data set PDATA.PP_AE.
+NOTE: There were 1 observations read from the data set WORK.QC_AE_10.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_AE has 43 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+=== Printing Data for VS section for Subject 01-701-1118 (1118) ===
+NOTE: Table WORK.VSFIGFMT created, with 18 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Format XVARFMT is already on the library WORK.FORMATS.
+NOTE: Format XVARFMT has been output.
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 18 observations read from the data set WORK.VSFIGFMT.
+
+NOTE: Table WORK.VSFMTIN created, with 6 rows and 4 columns.
+
+                                         The SAS System
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Format $VSFMT is already on the library WORK.FORMATS.
+NOTE: Format $VSFMT has been output.
+
+NOTE: PROCEDURE FORMAT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 6 observations read from the data set WORK.VSFMTIN.
+
+
+NOTE: The data set WORK.VSATTRMAP has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSFINAL.
+      WHERE (USUBJID='01-701-1118') and VSTESTCD in ('DIABP', 'PULSE', 'SYSBP', 'TEMP', 
+      'WEIGHT') and (not NMISS(VSSTRESN, VISITNUM));
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSSUBSET has 67 observations and 27 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET.
+NOTE: The data set WORK.VSTRANS has 5 observations and 16 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+                                         The SAS System
+
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set PREVPDAT.PP_VS.
+      WHERE USUBJID='01-701-1118';
+NOTE: The data set WORK.VSPREV has 5 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSPREV.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_PREV has 5 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK._M_ADD_UPDATE_VARS_CURR has 5 observations and 16 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_CURR.
+NOTE: There were 5 observations read from the data set WORK._M_ADD_UPDATE_VARS_PREV.
+NOTE: The data set WORK.VSTRANS has 5 observations and 18 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+WARNING: The CONTENTS option will have no effect for variable dummy because the PAGE option is 
+         not specified.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+NOTE: There were 5 observations read from the data set WORK.VSTRANS.
+NOTE: The data set WORK.QC_VS_10 has 6 observations and 19 variables.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+                                         The SAS System
+
+NOTE: Table WORK.VSSUBSET2 created, with 67 rows and 28 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The execution of this query involves performing one or more Cartesian product joins that 
+      can not be optimized.
+NOTE: Table WORK.BLOCKRECS created, with 90 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 67 observations read from the data set WORK.VSSUBSET2.
+NOTE: There were 90 observations read from the data set WORK.BLOCKRECS.
+NOTE: The data set WORK.VSFIGURE has 157 observations and 28 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 157 observations read from the data set WORK.VSFIGURE.
+NOTE: The data set WORK.VSFIGURE has 157 observations and 28 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: PROCEDURE SGPANEL used (Total process time):
+      real time           0.36 seconds
+      cpu time            0.01 seconds
+      
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: Some of the tick values have been thinned.
+NOTE: There were 157 observations read from the data set WORK.VSFIGURE.
+NOTE: There were 3 observations read from the data set WORK.VSATTRMAP.
+
+
+NOTE: There were 45 observations read from the data set PDATA.PP_VS.
+NOTE: There were 5 observations read from the data set WORK.QC_VS_10.
+      WHERE _break_=' ';
+NOTE: The data set PDATA.PP_VS has 50 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+NOTE: ODS PDF printed 2 pages to 
+      C:\Users\jmhor\OneDrive\Documents\GitHub\Patient-Profiles\Output\profile_1118_WK26_15SEP20
+      25.pdf.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 43 observations read from the data set PDATA.PP_AE.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 43 observations read from the data set PDATA.PP_AE.
+NOTE: The data set PDATA.PP_AE has 43 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 10 observations read from the data set PDATA.PP_DM.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 10 observations read from the data set PDATA.PP_DM.
+NOTE: The data set PDATA.PP_DM has 10 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+                                         The SAS System
+
+
+
+NOTE: There were 129 observations read from the data set PDATA.PP_SV.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 129 observations read from the data set PDATA.PP_SV.
+NOTE: The data set PDATA.PP_SV has 129 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 50 observations read from the data set PDATA.PP_VS.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 50 observations read from the data set PDATA.PP_VS.
+NOTE: The data set PDATA.PP_VS has 50 observations and 20 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: SAS Institute Inc., SAS Campus Drive, Cary, NC USA 27513-2414
+NOTE: The SAS System used:
+      real time           11.72 seconds
+      cpu time            0.68 seconds
+      
